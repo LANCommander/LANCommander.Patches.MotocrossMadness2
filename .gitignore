@@ -1,0 +1,11 @@
+# game files (copyrighted, never committed)
+/Game/
+# generated
+/build/
+/third_party/
+__pycache__/
+# local tooling and research scratch (disassembly listings, screenshots, test scripts; kept out of the repository)
+/tools/
+/re/
+/CLAUDE.md
+/.mcp.json
