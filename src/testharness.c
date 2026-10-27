@@ -538,10 +538,15 @@ static DWORD WINAPI script_thread(void *arg)
         } else if (!strcmp(cmd, "logres")) {
             char *dev = *(char **)(MCM_APP + 0xc);
             int want = *(int *)(MCM_APP + 0xfc4), cur = *(int *)(dev + 0xc), count = *(int *)(dev + 8);
-            int *modes = *(int **)(dev + 0x10);
+            int *modes = *(int **)(dev + 0x10), i, list16 = 0, list32 = 0;
+            for (i = 0; i < count; i++) {   /* the flags Options - Graphics lists a mode by (+0x14, +0x18) */
+                list16 += modes[i * 9 + 5] == 1;
+                list32 += modes[i * 9 + 6] == 1;
+            }
             mcm_log("test: settings mode %d (%dx%dx%d), device mode %d, %d modes, global %d", want,
                     want >= 0 && want < count ? modes[want * 9] : 0, want >= 0 && want < count ? modes[want * 9 + 1] : 0,
                     want >= 0 && want < count ? modes[want * 9 + 2] : 0, cur, count, *(int *)0x68e918);
+            mcm_log("test: %d / %d modes listed, video memory %d MB", list16, list32, *(int *)(dev + 0x54) / (1 << 20));
         } else if (!strcmp(cmd, "shot")) {
             shot(line + 5);          /* the rest of the line: the path may have spaces */
         } else if (!strcmp(cmd, "appset")) {

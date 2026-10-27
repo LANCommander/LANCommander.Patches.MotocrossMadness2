@@ -446,7 +446,7 @@ static void load_settings(void)
  *     per key:   u16 length, name ("{guid}"), u32 values,
  *     per value: u8 length, name, u32 type, u32 size, data */
 #define CARDS_MAGIC   0x5643434du
-#define CARDS_VERSION 1u
+#define CARDS_VERSION 2u      /* 2: measured with the video memory capped (d3d.c), 1 lost the wide modes on big cards */
 
 static unsigned long long g_cards_tag;
 

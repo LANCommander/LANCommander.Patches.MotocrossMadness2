@@ -616,6 +616,7 @@ static const GUID IID_D3D7 = { 0xf5049e77, 0x4861, 0x11d2, { 0xa4, 0x07, 0x00, 0
 
 typedef HRESULT (WINAPI *CreateSurface_fn)(void *, DDSURFACEDESC2 *, void **, void *);
 typedef HRESULT (WINAPI *EnumDisplayModes_fn)(void *, DWORD, DDSURFACEDESC2 *, void *, LPDDENUMMODESCALLBACK2);
+typedef HRESULT (WINAPI *GetAvailableVidMem_fn)(void *, void *, DWORD *, DWORD *);
 typedef HRESULT (WINAPI *SetCooperativeLevel_fn)(void *, HWND, DWORD);
 typedef HRESULT (WINAPI *SetDisplayMode_fn)(void *, DWORD, DWORD, DWORD, DWORD, DWORD);
 
@@ -669,6 +670,28 @@ static HRESULT WINAPI dd_EnumDisplayModes(void *dd, DWORD flags, DDSURFACEDESC2 
     HRESULT hr = ORIG(EnumDisplayModes_fn, dd, 8)(dd, flags, desc, &e, enum_mode);
     if (mcm_d3d.on_enum_done) {
         mcm_d3d.on_enum_done(cb, ctx);
+    }
+    return hr;
+}
+
+/* The card profile (0x4c56c3) keeps the total video memory as a signed int (device+0x54, "TotalVideoMemory"), and
+   0x4c4cf0 drops every mode wider than 640 whose triple buffer leaves less than MinimumTextureMB of it. A card
+   reporting 2 GB or more came out negative, so Options - Graphics offered 640x480 only. Capped at 1 GB. */
+#define VIDMEM_CAP 0x40000000u
+
+static HRESULT WINAPI dd_GetAvailableVidMem(void *dd, void *caps, DWORD *total, DWORD *free_mem)
+{
+    static int logged;
+    HRESULT hr = ORIG(GetAvailableVidMem_fn, dd, 23)(dd, caps, total, free_mem);
+    if (hr == 0 && total && *total > VIDMEM_CAP) {
+        if (!logged) {
+            logged = 1;
+            mcm_log("d3d: video memory %lu MB reported as %u MB", *total >> 20, VIDMEM_CAP >> 20);
+        }
+        *total = VIDMEM_CAP;
+    }
+    if (hr == 0 && free_mem && *free_mem > VIDMEM_CAP) {
+        *free_mem = VIDMEM_CAP;
     }
     return hr;
 }
@@ -727,6 +750,7 @@ static void hook_ddraw(void *dd)
     vhook(vt, 0, dd_QueryInterface);
     vhook(vt, 6, dd_CreateSurface);
     vhook(vt, 8, dd_EnumDisplayModes);
+    vhook(vt, 23, dd_GetAvailableVidMem);
     vhook(vt, 20, dd_SetCooperativeLevel);
     vhook(vt, 21, dd_SetDisplayMode);
 }
