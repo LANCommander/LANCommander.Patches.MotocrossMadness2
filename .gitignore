@@ -3,6 +3,7 @@
 # generated
 /build/
 /third_party/
+/vcpkg_installed/
 __pycache__/
 # local tooling and research scratch (disassembly listings, screenshots, test scripts; kept out of the repository)
 /tools/

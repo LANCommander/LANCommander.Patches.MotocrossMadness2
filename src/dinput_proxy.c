@@ -1,11 +1,16 @@
 /* dinput.dll proxy: the game imports DINPUT.dll!DirectInputCreateEx (and LoadLibrary()s DINPUT.DLL to look
  * for DirectInputCreateA when it picks its DirectX level), so Windows loads this file from the game folder
- * first. The real DLL is loaded from the system directory and every call forwarded; DllMain applies the
- * patches before MCM2.EXE's entry point runs. */
+ * first. DllMain applies the patches before MCM2.EXE's entry point runs.
+ *
+ * DirectInputCreateA / Ex go through the Interposer embedded in this DLL (InterposerDirectInputCreate*), which keeps
+ * its DirectInput options (DeviceFilter, FixLegacyDeviceEnumeration) in effect and otherwise calls the real DLL in
+ * the system directory; exporting them is also how another Interposer in the game recognises this DLL and leaves its
+ * exports alone. Everything else is forwarded to the real DLL. */
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
 #include "mcm2patch.h"
+#include "interposer/LANCommander.Interposer.h"
 
 static FARPROC real_proc(const char *name)
 {
@@ -26,82 +31,59 @@ static FARPROC real_proc(const char *name)
 #define REAL(name, type) static type real; if (!real) { real = (type)(void (*)(void))real_proc(#name); if (!real) return E_FAIL; }
 
 typedef HRESULT (WINAPI *DirectInputCreate_fn)(HINSTANCE, DWORD, void **, void *);
-typedef HRESULT (WINAPI *DirectInputCreateEx_fn)(HINSTANCE, DWORD, REFIID, void **, void *);
 typedef HRESULT (WINAPI *DllGetClassObject_fn)(REFCLSID, REFIID, void **);
 typedef HRESULT (WINAPI *Void_fn)(void);
 
-__declspec(dllexport) HRESULT WINAPI DirectInputCreateA(HINSTANCE inst, DWORD ver, void **out, void *outer)
+HRESULT WINAPI DirectInputCreateA(HINSTANCE inst, DWORD ver, void **out, void *outer)
 {
-    REAL(DirectInputCreateA, DirectInputCreate_fn);
-    return real(inst, ver, out, outer);
+    return InterposerDirectInputCreateA(inst, ver, out, outer);
 }
 
-__declspec(dllexport) HRESULT WINAPI DirectInputCreateW(HINSTANCE inst, DWORD ver, void **out, void *outer)
+HRESULT WINAPI DirectInputCreateW(HINSTANCE inst, DWORD ver, void **out, void *outer)
 {
     REAL(DirectInputCreateW, DirectInputCreate_fn);
     return real(inst, ver, out, outer);
 }
 
-__declspec(dllexport) HRESULT WINAPI DirectInputCreateEx(HINSTANCE inst, DWORD ver, REFIID iid, void **out, void *outer)
+HRESULT WINAPI DirectInputCreateEx(HINSTANCE inst, DWORD ver, REFIID iid, void **out, void *outer)
 {
-    HRESULT hr;
-    REAL(DirectInputCreateEx, DirectInputCreateEx_fn);
-    hr = real(inst, ver, iid, out, outer);
+    HRESULT hr = InterposerDirectInputCreateEx(inst, ver, iid, out, outer);
     if (hr == 0 && out && *out) {
         *out = mcm_gamepad_wrap_dinput(*out);
     }
     return hr;
 }
 
-__declspec(dllexport) HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
+HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
 {
     REAL(DllGetClassObject, DllGetClassObject_fn);
     return real(clsid, iid, out);
 }
 
-__declspec(dllexport) HRESULT WINAPI DllCanUnloadNow(void)
+HRESULT WINAPI DllCanUnloadNow(void)
 {
     return S_FALSE;   /* the patch stays loaded for the life of the process */
 }
 
-__declspec(dllexport) HRESULT WINAPI DllRegisterServer(void)
+HRESULT WINAPI DllRegisterServer(void)
 {
     REAL(DllRegisterServer, Void_fn);
     return real();
 }
 
-__declspec(dllexport) HRESULT WINAPI DllUnregisterServer(void)
+HRESULT WINAPI DllUnregisterServer(void)
 {
     REAL(DllUnregisterServer, Void_fn);
     return real();
 }
 
-/* mcm2patch.ini / mcm2patch.log next to this DLL */
-static void patch_init(HINSTANCE dll)
-{
-    char ini[MAX_PATH], log[MAX_PATH + 16], *slash;
-    GetModuleFileNameA(dll, ini, MAX_PATH);
-    slash = strrchr(ini, '\\');
-    if (slash) {
-        slash[1] = '\0';
-    }
-    strcpy(log, ini);
-    strcat(ini, "mcm2patch.ini");
-    strcat(log, "mcm2patch.log");
-    DeleteFileA(log);
-    mcm_set_files(ini, log);
-
-    if (mcm_patch_start()) {
-        mcm_install();
-    }
-}
-
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
-    (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(inst);
-        patch_init(inst);
+        mcm_standalone_init(inst);
+    } else if (reason == DLL_PROCESS_DETACH) {
+        mcm_standalone_detach(reserved != NULL);
     }
     return TRUE;
 }

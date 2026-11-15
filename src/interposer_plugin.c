@@ -69,6 +69,14 @@ static const wchar_t DEFAULTS[] =
     L"StartKey: 1\n"
     L"BackKey: 14\n"
     L"MaxPlayers: 8\n"
+    L"MatchStatistics: true\n"
+    L"SinglePlayerRaces: false\n"
+    L"ReportAsClient: false\n"
+    L"ServerUrl: \"\"\n"
+    L"Token: \"\"\n"
+    L"GameId: \"\"\n"
+    L"ServerId: \"\"\n"
+    L"ReporterName: \"\"\n"
     L"CrashLog: false\n";
 
 /* Plugins.MotocrossMadness2 from Config.yml, for Interposer builds whose InterposerGetConfigString is unusable */
@@ -216,9 +224,10 @@ static void log_line(const char *line)
     }
 }
 
-__declspec(dllexport) void WINAPI InterposerPluginInit(HMODULE interposer)
+void WINAPI InterposerPluginInit(HMODULE interposer)
 {
     InterposerRegisterPluginConfig_fn register_config;
+    mcm_set_interposer(interposer);
     g_log = (InterposerLog_fn)(void (*)(void))GetProcAddress(interposer, "InterposerLog");
     register_config = (InterposerRegisterPluginConfig_fn)(void (*)(void))GetProcAddress(interposer, "InterposerRegisterPluginConfig");
     if (register_config) {

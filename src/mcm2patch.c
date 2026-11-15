@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "mcm2patch.h"
+#ifdef MCM_INTERPOSER_EMBEDDED
+#include "interposer/LANCommander.Interposer.Embedded.h"
+#endif
 
 #define MCM_TIMESTAMP 0x63732172u   /* MCM2.EXE 2.10 without SafeDisc (1,576,960 bytes) */
 #define MCM_ENTRY     0x13d6f5u
@@ -250,6 +253,7 @@ void mcm_install(void)
     mcm_framerate_install();
     mcm_players_install();
     mcm_gamepad_install();
+    mcm_matchstats_install();
     mcm_test_install();
 }
 
@@ -257,4 +261,59 @@ void mcm_set_files(const char *ini, const char *log)
 {
     lstrcpynA(g_ini, ini, MAX_PATH);
     lstrcpynA(g_log, log, MAX_PATH);
+}
+
+static HMODULE g_interposer;
+#ifdef MCM_INTERPOSER_EMBEDDED
+static int g_embedded;   /* 1 = this DLL's Interposer owns the game, -1 = another one does */
+#endif
+
+HMODULE mcm_interposer(void) { return g_interposer; }
+void mcm_set_interposer(HMODULE interposer) { g_interposer = interposer; }
+
+/* the dinput.dll proxy and the ASI: mcm2patch.ini / mcm2patch.log next to the DLL */
+void mcm_standalone_init(HINSTANCE dll)
+{
+    char ini[MAX_PATH], log[MAX_PATH + 16], *slash;
+    GetModuleFileNameA(dll, ini, MAX_PATH);
+    slash = strrchr(ini, '\\');
+    if (slash) {
+        slash[1] = '\0';
+    }
+    strcpy(log, ini);
+    strcat(ini, "mcm2patch.ini");
+    strcat(log, "mcm2patch.log");
+    DeleteFileA(log);
+    mcm_set_files(ini, log);
+
+#ifdef MCM_INTERPOSER_EMBEDDED
+    /* the Interposer linked into this DLL, attached before any patch is installed: it reads .interposer\Config.yml
+     * next to this DLL (with none, its hooks change nothing). With another LANCommander Interposer already in the
+     * game it installs nothing and forwards its calls to that one. Its Interposer* functions are exported from this
+     * DLL, so the modules find them as they find the plugin build's host. */
+    g_embedded = InterposerEmbeddedAttach(dll) ? 1 : -1;
+    mcm_set_interposer(dll);
+    {
+        typedef DWORD (*features_fn)(void);
+        features_fn features = (features_fn)(void (*)(void))GetProcAddress(dll, "InterposerGetFeatures");
+        mcm_log("interposer: embedded (features %#lx), %s", features ? features() : 0ul,
+                g_embedded > 0 ? "installed its hooks" : "another LANCommander Interposer in the game has the hooks");
+    }
+#endif
+
+    if (mcm_patch_start()) {
+        mcm_install();
+    }
+}
+
+void mcm_standalone_detach(BOOL process_terminating)
+{
+#ifdef MCM_INTERPOSER_EMBEDDED
+    mcm_matchstats_shutdown(process_terminating);
+    if (g_embedded) {
+        InterposerEmbeddedDetach(process_terminating);
+    }
+#else
+    (void)process_terminating;
+#endif
 }

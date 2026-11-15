@@ -22,11 +22,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # the Interposer embedded in dinput.dll and the ASI: build.sh builds its static library with the features it
+      # names. The branch or tag in the repository variable INTERPOSER_REF, else main
+      - uses: actions/checkout@v4
+        with:
+          repository: LANCommander/LANCommander.Interposer
+          ref: ${{ vars.INTERPOSER_REF || 'main' }}
+          path: LANCommander.Interposer
+          fetch-depth: 0
+
+      - name: Interposer prerequisites
+        shell: pwsh
+        working-directory: LANCommander.Interposer
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File build/Get-YYThunks.ps1
+
+      # the patch is built with the runner's LLVM (clang, lld-link) against Visual Studio's headers and libraries;
+      # MinGW only for the Indeo 5 decoder (FFmpeg)
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW32
           update: true
-          install: mingw-w64-i686-gcc mingw-w64-i686-SDL2 make diffutils pkgconf zip
+          install: mingw-w64-i686-gcc make diffutils pkgconf zip
+
+      - name: Locate vcpkg
+        run: |
+          echo "VCPKG_ROOT=$(cygpath -m "$VCPKG_INSTALLATION_ROOT")" >> "$GITHUB_ENV"
+          echo "INTERPOSER_DIR=$(cygpath -m "$GITHUB_WORKSPACE/LANCommander.Interposer")" >> "$GITHUB_ENV"
 
       # the FFmpeg build behind the Indeo 5 decoder only changes with build_ir50.sh
       - uses: actions/cache@v4

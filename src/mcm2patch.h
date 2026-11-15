@@ -16,6 +16,16 @@ void mcm_set_files(const char *ini, const char *log);
 void mcm_set_backend(int (*config_int)(const char *section, const char *key, int def), void (*log_line)(const char *line));
 void mcm_set_string_backend(int (*config_str)(const char *section, const char *key, char *out, int size));
 
+/* the dinput.dll proxy and the ASI: settings / log files next to the DLL, the embedded Interposer attached (built with
+ * MCM_INTERPOSER_EMBEDDED), then the patches. Detach from DLL_PROCESS_DETACH. */
+void mcm_standalone_init(HINSTANCE dll);
+void mcm_standalone_detach(BOOL process_terminating);
+
+/* the module that exports the LANCommander Interposer API: this DLL with the Interposer embedded, the Interposer
+ * that loaded the plugin build, or NULL */
+HMODULE mcm_interposer(void);
+void mcm_set_interposer(HMODULE interposer);
+
 /* memory helpers (all addresses are MCM2.EXE VAs, image base 0x400000, no relocations) */
 int mcm_write(uint32_t addr, const void *bytes, size_t len);
 int mcm_expect(uint32_t addr, const void *bytes, size_t len);   /* 1 if memory matches */
@@ -62,6 +72,8 @@ void mcm_lod_install(void);          /* lod.c: detailed trees and models further
 void mcm_framerate_install(void);    /* framerate.c */
 void mcm_players_install(void);      /* players.c: more than 8 players in network games */
 void mcm_gamepad_install(void);      /* gamepad.c: SDL gamepads + rumble */
+void mcm_matchstats_install(void);   /* matchstats.c: races reported to LANCommander through the Interposer */
+void mcm_matchstats_shutdown(BOOL process_terminating);   /* the game is closing: an open race ends abandoned */
 
 /* gamepad.c: the IDirectInput7A the game created (wrapped to add the SDL gamepads) */
 void *mcm_gamepad_wrap_dinput(void *direct_input);

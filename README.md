@@ -16,6 +16,10 @@ executable. The following fixes/improvements are included:
   analog steering and lean, and the triggers for throttle and brake.
 - **Rumble.** The game's force feedback (impacts and the road under the wheels) drives the gamepad's rumble.
 - **Fewer crashes.** A failed DirectSound buffer lock no longer crashes the engine sound.
+- **Match statistics.** Races are reported to [LANCommander](https://github.com/LANCommander/LANCommander)'s match
+  statistics through the [LANCommander Interposer](https://github.com/LANCommander/LANCommander.Interposer) (built into
+  `dinput.dll` and the ASI): riders, every lap and finish, and the final standings with finishing times, best laps,
+  stunt scores, tag times and tournament points.
 
 It only supports `MCM2.EXE` 2.10 without SafeDisc (1,576,960 bytes, PE timestamp `0x63732172`). Any other executable is left alone and logged.
 
@@ -74,29 +78,74 @@ plugin too.
 | | `Slots` | Empty gamepad slots offered for pads plugged in while the game runs (default 0) |
 | | `StartKey`, `BackKey` | Keys Start and Back press (Escape, Backspace "back up") |
 | `[Players]` | `MaxPlayers` | Stays 8 (more is not done yet) |
+| `[Stats]` | `MatchStatistics` | Races reported to LANCommander (see below) |
+| | `SinglePlayerRaces` | Races against computer riders reported too (default 0) |
+| | `ReportAsClient` | Network races joined on another computer reported too (default 0: the host reports) |
+| | `ServerUrl`, `Token`, `GameId`, `ServerId`, `ReporterName` | Where to report; empty = `MatchStatistics` in `.interposer\Config.yml` |
 | `[Debug]` | `CrashLog` | Logs crashes with registers and a call chain to `mcm2patch.log` |
+
+## Match statistics
+
+Each Single Event or Tournament race (Practice, Ghost races and replays are not) is reported as one match, from the
+gate drop to the final standings: the riders (`name:<profile>` for players, `bot:<name>` for computer riders),
+`lap_completed` events (`lap`, `lap_ms`, `race_ms`, `position`), `finished` events, and the results with each rider's
+place, finishing time, `best_lap_ms`, `laps`, `race_time_ms` (Stunt Quarry: `score`, `biggest_stunt`; Tag:
+`tag_time_ms`, `longest_tag_ms`; Tournament: `tournament_points`). A race quit from the pause menu or restarted ends
+as abandoned. In a single-player race the computer riders still out when the player finishes get a time made up by
+the game; their `finished` event says `"estimated": true`.
+
+Where the reports go is decided by the Interposer:
+
+- **`[Stats] ServerUrl`, `Token`, `GameId`** (or `MatchStatistics` in `.interposer\Config.yml`): this computer sends
+  them to that LANCommander server with the token (an access token with the **Report matches** scope).
+- **Otherwise, when LANCommander's launcher started the game**: the launcher reports them as the signed-in player.
+- **Neither**: they are only logged (`Logging: { Matches: true }` in `.interposer\Config.yml`).
+
+Network races are reported by the host (the patch has only been tested in single-player races; DirectPlay games
+could not be tried yet).
 
 ## Building
 
-Requires MSYS2 with the 32-bit MinGW toolchain, SDL 2 and the FFmpeg build tools:
+The patch is C built with clang for the MSVC target (lld-link, static CRT), because `dinput.dll` and the ASI embed
+the [LANCommander Interposer](https://github.com/LANCommander/LANCommander.Interposer)'s static library, which is
+MSVC C++. It requires:
 
-```
-pacman -S mingw-w64-i686-gcc mingw-w64-i686-SDL2 make diffutils pkgconf
-```
+- MSYS2 with clang and lld (`pacman -S mingw-w64-clang-x86_64-clang mingw-w64-clang-x86_64-lld`; LLVM for Windows
+  works too), and for the Indeo 5 decoder the 32-bit MinGW toolchain and the FFmpeg build tools
+  (`pacman -S mingw-w64-i686-gcc make diffutils pkgconf`)
+- Visual Studio 2022 or later with the C++ x86 tools and a Windows SDK, and CMake (Visual Studio's is found)
+- [vcpkg](https://vcpkg.io) in `VCPKG_ROOT`: SDL 2 (`vcpkg.json`) and the Interposer's dependencies
+- the Interposer's source next to this repository (or in `INTERPOSER_DIR`)
 
 SDL is linked statically, so the patch stays a single DLL (SDL is under the
 [zlib license](https://github.com/libsdl-org/SDL/blob/SDL2/LICENSE.txt)).
 
 ```
+git clone https://github.com/LANCommander/LANCommander.Interposer.git
 git clone https://github.com/LANCommander/LANCommander.Patches.MotocrossMadness2.git
 cd LANCommander.Patches.MotocrossMadness2
-sh build.sh
+VCPKG_ROOT=C:/vcpkg sh build.sh
 ```
 
+`build.sh` builds the Interposer's static library itself (into `../LANCommander.Interposer/out/mcm2-x86`, once) with
+only the features listed in `INTERPOSER_FEATURES`: `DIRECTINPUT` (the game's DirectInput goes through it) and
+`MATCHES` (match statistics) by default. Every other Interposer feature is left out of the DLL; its API still
+answers, as switched off. To carry more, for example the network relay for a LANCommander configuration that uses it:
+
+```
+INTERPOSER_FEATURES="DIRECTINPUT MATCHES NETWORK RELAY" sh build.sh
+```
+
+When the patch's Interposer is the first one in the game, a feature it does not carry is off for the whole game,
+whatever `.interposer\Config.yml` says. With LANCommander's own Interposer in the game (deployed by LANCommander),
+use the Interposer plugin package instead of `dinput.dll`.
+
 Output:
-- `build\dinput.dll`: the standalone patch (a DirectInput proxy that forwards to the system DLL).
-- `build\mcm2patch.asi`: the same patches as an ASI plugin.
-- `build\LANCommander.Interposer.Plugin.MotocrossMadness2.dll`: the Interposer plugin.
+- `build\dinput.dll`: the standalone patch (a DirectInput proxy that forwards to the system DLL), with the Interposer
+  embedded.
+- `build\mcm2patch.asi`: the same as an ASI plugin.
+- `build\LANCommander.Interposer.Plugin.MotocrossMadness2.dll`: the Interposer plugin (no Interposer of its own; it
+  uses the one that loads it).
 - `build\mcm2patch\ir50.dll`: the Indeo 5 movie decoder, built by `build_ir50.sh`. That script downloads FFmpeg
   7.1.1 (checked against its SHA-256) and builds only the `indeo5` decoder. The decoder is a separate LGPL
   component (`src/ir50/README.md`).
@@ -111,7 +160,7 @@ publish it from the Releases page.
 
 | path | contents |
 |---|---|
-| `src/` | The patch:<br>- `mcm2patch.c` (exe check, settings, guarded memory writes) and `iat.c` (import table hooks)<br>- `paths.c`, `compat.c`, `registry.c`, `saves.c`, `profile.c`, `device.c`, `movie.c`<br>- `d3d.c` (DirectDraw / Direct3D hooks), `widescreen.c`, `hud.c`, `dgvoodoo.c`, `framerate.c`<br>- `gamepad.c` + `pad_rumble.c`, `players.c` (research notes)<br>- `ir50/` (the Indeo 5 decoder)<br>- the loaders `dinput_proxy.c`, `asi.c`, `interposer_plugin.c`<br>- a test harness (`testharness.c`, scripted input and frame captures; does nothing unless `MCM_TEST` names a script) and `crashlog.c` |
+| `src/` | The patch:<br>- `mcm2patch.c` (exe check, settings, guarded memory writes) and `iat.c` (import table hooks)<br>- `paths.c`, `compat.c`, `registry.c`, `saves.c`, `profile.c`, `device.c`, `movie.c`<br>- `d3d.c` (DirectDraw / Direct3D hooks), `widescreen.c`, `hud.c`, `dgvoodoo.c`, `framerate.c`<br>- `gamepad.c` + `pad_rumble.c`, `players.c` (research notes)<br>- `matchstats.c` (races reported through the Interposer; its headers in `interposer/`)<br>- `ir50/` (the Indeo 5 decoder)<br>- the loaders `dinput_proxy.c`, `asi.c`, `interposer_plugin.c`<br>- a test harness (`testharness.c`, scripted input and frame captures; does nothing unless `MCM_TEST` names a script) and `crashlog.c` |
 | `dist/` | `mcm2patch.ini`, shipped with the dinput.dll and ASI packages |
 
 The game files are not included. You need your own copy of the game.
